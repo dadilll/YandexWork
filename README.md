@@ -32,7 +32,7 @@
 Для получения списка задач используйте следующий запрос:
 
 ```bash
-curl http://localhost:8080/expressions
+curl -X GET http://localhost:8080/expressions 
 ```
 
 ### Добавление задач
