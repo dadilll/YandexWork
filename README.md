@@ -1,5 +1,5 @@
 # Документация к проекту YandexWork
-![Uml Diagram](https://github.com/dadilll/YandexWork1/assets/147308879/9b604897-b300-4b2c-8879-f160396e0e1f)
+![Uml Diagram](https://github.com/dadilll/YandexWork/assets/147308879/5fa19a2c-3206-4b22-b5ba-988ce6368eef)
 
 # Задачи
 ## Не начато
