@@ -1,6 +1,10 @@
 # Документация к проекту YandexWork
 ![Uml Diagram](https://github.com/dadilll/YandexWork/assets/147308879/5fa19a2c-3206-4b22-b5ba-988ce6368eef)
 
+
+
+Если что то не понятно пишите мне: https://t.me/Dadilesss
+
 # Задачи
 ## Не начато
 
