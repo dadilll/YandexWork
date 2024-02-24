@@ -46,45 +46,45 @@ func TokenizeExpression(expression string) ([]Token, error) {
 	return tokens, nil
 }
 
-func ParseExpression(expression string) (float64, float64, string, int, error) {
+func ParseExpression(expression string) (float64, error) {
 	tokens, err := TokenizeExpression(expression)
 	if err != nil {
-		return 0, 0, "", 0, err
+		return 0, err
 	}
 
-	//тут время операции
-	operators := []Operation{
-		{"+", 4},
-		{"-", 5},
-		{"*", 3},
-		{"/", 2},
-	}
+	for _, op := range []string{"*/", "+-"} {
+		for {
+			found := false
+			for i, token := range tokens {
+				if token.Type == "operator" && strings.Contains(op, token.Value) {
+					op1, err := strconv.ParseFloat(tokens[i-1].Value, 64)
+					if err != nil {
+						return 0, fmt.Errorf("invalid operand 1: %s", tokens[i-1].Value)
+					}
+					op2, err := strconv.ParseFloat(tokens[i+1].Value, 64)
+					if err != nil {
+						return 0, fmt.Errorf("invalid operand 2: %s", tokens[i+1].Value)
+					}
 
-	var op1, op2 float64
-	var operator string
-	var duration int
+					result, err := EvaluateExpression(op1, op2, token.Value, 0)
+					if err != nil {
+						return 0, err
+					}
 
-	for _, op := range operators {
-		for i, token := range tokens {
-			if token.Value == op.Operator {
-				op1, err = strconv.ParseFloat(tokens[i-1].Value, 64)
-				if err != nil {
-					return 0, 0, "", 0, fmt.Errorf("invalid operand 1: %s", tokens[i-1].Value)
+					// Заменяем оператор и его операнды результатом вычисления
+					tokens = append(tokens[:i-1], append([]Token{{Type: "number", Value: fmt.Sprintf("%f", result)}}, tokens[i+2:]...)...)
+					found = true
+					break
 				}
-
-				op2, err = strconv.ParseFloat(tokens[i+1].Value, 64)
-				if err != nil {
-					return 0, 0, "", 0, fmt.Errorf("invalid operand 2: %s", tokens[i+1].Value)
-				}
-
-				operator = op.Operator
-				duration = op.DurationSeconds
-				return op1, op2, operator, duration, nil
+			}
+			if !found {
+				break
 			}
 		}
 	}
 
-	return 0, 0, "", 0, fmt.Errorf("invalid expression: %s", expression)
+	// Возвращаем результат
+	return strconv.ParseFloat(tokens[0].Value, 64)
 }
 
 func EvaluateExpression(op1, op2 float64, operator string, duration int) (float64, error) {

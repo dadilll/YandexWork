@@ -3,20 +3,17 @@ package domain
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
-	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
 
 type Task struct {
-	ID         string    `json:"id"`
-	Expression string    `json:"expression"`
-	Status     string    `json:"status"`
-	StartTime  time.Time `json:"start_time"`
-	Result     float64   `json:"result"`
+	ID         string  `json:"id"`
+	Expression string  `json:"expression"`
+	Status     string  `json:"status"`
+	Result     float64 `json:"result"`
 }
 
 type Orchestrator struct {
@@ -39,8 +36,7 @@ func NewOrchestrator(redis *redis.Client) *Orchestrator {
 
 func (o *Orchestrator) AddTask(expression string) (string, error) {
 	taskID := generateTaskID()
-	taskKey := fmt.Sprintf(taskID)
-	task := Task{ID: taskID, Expression: expression, Status: "pending", StartTime: time.Now()}
+	task := Task{ID: taskID, Expression: expression, Status: "pending"} // Используем config.Task здесь
 
 	// Проверяем, была ли уже обработана задача с таким ID
 	if _, exists := o.processedTasks[taskID]; exists {
@@ -54,7 +50,7 @@ func (o *Orchestrator) AddTask(expression string) (string, error) {
 		return "", err
 	}
 
-	err = o.Redis.Set(context.Background(), taskKey, data, 0).Err()
+	err = o.Redis.Set(context.Background(), taskID, data, 0).Err()
 	if err != nil {
 		log.Println("Error saving task to Redis:", err)
 		return "", err
@@ -74,8 +70,8 @@ func (o *Orchestrator) GetTasks() []Task {
 	}
 
 	var tasks []Task
-	for _, taskKey := range taskKeys {
-		data, err := o.Redis.Get(context.Background(), taskKey).Result()
+	for _, taskID := range taskKeys { // Используйте просто taskID вместо "task:" + taskID
+		data, err := o.Redis.Get(context.Background(), taskID).Result()
 		if err != nil {
 			log.Println("Error getting task from Redis:", err)
 			continue
@@ -95,8 +91,7 @@ func (o *Orchestrator) GetTasks() []Task {
 }
 
 func (o *Orchestrator) GetTaskByID(id string) *Task {
-	taskKey := fmt.Sprintf("task:%s", id)
-	data, err := o.Redis.Get(context.Background(), taskKey).Result()
+	data, err := o.Redis.Get(context.Background(), id).Result()
 	if err != nil {
 		log.Println("Error getting task from Redis:", err)
 		return nil
@@ -111,7 +106,6 @@ func (o *Orchestrator) GetTaskByID(id string) *Task {
 
 	return &task
 }
-
 func generateTaskID() string {
 	taskID := uuid.New()
 	return taskID.String()

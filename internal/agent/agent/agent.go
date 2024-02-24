@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"hash/fnv"
 	"log"
 	"sync"
@@ -14,20 +13,18 @@ import (
 )
 
 type Task struct {
-	ID         string    `json:"id"`
-	Expression string    `json:"expression"`
-	Status     string    `json:"status"`
-	StartTime  time.Time `json:"start_time"`
-	Result     float64   `json:"result"`
+	ID         string  `json:"id"`
+	Expression string  `json:"expression"`
+	Status     string  `json:"status"`
+	Result     float64 `json:"result"`
 }
 
 type Agent struct {
-	ID         int
-	Redis      *redis.Client
-	TaskQueues []chan Task // Вот это новое поле
-	Workers    int
-	taskLocks  map[string]*sync.Mutex
-	lockMap    sync.Map
+	ID            int
+	Redis         *redis.Client
+	TaskQueues    []chan Task // Используем config.Task здесь
+	Workers       int
+	executingLock sync.Map // Map для отслеживания выполняющихся задач
 }
 
 func NewAgent(id int, redis *redis.Client, workers int) *Agent {
@@ -35,15 +32,13 @@ func NewAgent(id int, redis *redis.Client, workers int) *Agent {
 	agent := &Agent{
 		ID:         id,
 		Redis:      redis,
-		TaskQueues: make([]chan Task, workers), // Создание слайса каналов
+		TaskQueues: make([]chan Task, workers), // Используем config.Task здесь
 		Workers:    workers,
-		taskLocks:  make(map[string]*sync.Mutex),
 	}
 
-	// Инициализируем мьютексы для блокировки задач
+	// Инициализируем каналы задач для воркеров
 	for i := 0; i < workers; i++ {
 		agent.TaskQueues[i] = make(chan Task)
-		agent.taskLocks[fmt.Sprintf("worker-%d", i)] = &sync.Mutex{}
 	}
 
 	return agent
@@ -70,8 +65,15 @@ func (a *Agent) Start() {
 
 func (a *Agent) worker(workerID int) {
 	for task := range a.TaskQueues[workerID] {
-		if a.isTaskBeingProcessed(task.ID) {
-			// Задача уже обрабатывается другим воркером, пропускаем её
+		// Пытаемся заблокировать задачу
+		lockKey := "lock:" + task.ID
+		locked, err := a.Redis.SetNX(context.Background(), lockKey, "locked", time.Minute).Result()
+		if err != nil {
+			log.Printf("Error setting lock for task %s: %v", task.ID, err)
+			continue
+		}
+		if !locked {
+			// Задача уже обрабатывается другим агентом, пропускаем её
 			continue
 		}
 
@@ -81,16 +83,23 @@ func (a *Agent) worker(workerID int) {
 		log.Printf("Agent %d: Worker %d started processing task %s", a.ID, workerID, task.ID)
 		a.processTask(task)
 		log.Printf("Agent %d: Worker %d finished processing task %s", a.ID, workerID, task.ID)
+
+		// Снимаем блокировку
+		if err := a.Redis.Del(context.Background(), lockKey).Err(); err != nil {
+			log.Printf("Error removing lock for task %s: %v", task.ID, err)
+		}
+
+		// По завершении обработки задачи освобождаем её
+		a.markTaskAsFinished(task.ID)
 	}
 }
 
-func (a *Agent) isTaskBeingProcessed(taskID string) bool {
-	_, ok := a.lockMap.Load(taskID)
-	return ok
+func (a *Agent) markTaskAsBeingProcessed(taskID string) {
+	a.executingLock.Store(taskID, true)
 }
 
-func (a *Agent) markTaskAsBeingProcessed(taskID string) {
-	a.lockMap.Store(taskID, true)
+func (a *Agent) markTaskAsFinished(taskID string) {
+	a.executingLock.Delete(taskID)
 }
 
 func (a *Agent) checkTasks() {
@@ -134,20 +143,14 @@ func hash(s string) int {
 	h.Write([]byte(s))
 	return int(h.Sum32())
 }
-
 func (a *Agent) processTask(task Task) {
-	op1, op2, operator, duration, err := expression.ParseExpression(task.Expression)
+	result, err := expression.ParseExpression(task.Expression)
 	if err != nil {
 		log.Printf("Error parsing expression for task %s: %s", task.ID, err)
 		task.Status = "error"
 	} else {
-		task.Result, err = expression.EvaluateExpression(op1, op2, operator, duration)
-		if err != nil {
-			log.Printf("Error evaluating expression for task %s: %s", task.ID, err)
-			task.Status = "error"
-		} else {
-			task.Status = "completed"
-		}
+		task.Result = result
+		task.Status = "completed"
 	}
 
 	taskJSON, err := json.Marshal(task)

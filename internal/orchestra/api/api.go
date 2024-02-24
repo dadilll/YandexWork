@@ -62,6 +62,18 @@ func (api *OrchestratorAPI) AddExpression(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Проверка на существование задачи с таким же выражением
+	existingTasks := api.Orchestrator.GetTasks()
+	for _, existingTask := range existingTasks {
+		if existingTask.Expression == expressionRequest.Expression {
+			response := map[string]string{"id": existingTask.ID}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+	}
+
+	// Добавление новой задачи
 	id, err := api.Orchestrator.AddTask(expressionRequest.Expression)
 	if err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)

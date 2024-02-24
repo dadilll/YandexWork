@@ -6,17 +6,14 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Dadil/project/config"
 	"github.com/Dadil/project/internal/orchestra/api"
 	"github.com/Dadil/project/internal/orchestra/domain"
-	"github.com/go-redis/redis/v8"
 )
 
 func main() {
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
+
+	redisClient := config.NewRedisClient()
 
 	// Проверка соединения с Redis
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
