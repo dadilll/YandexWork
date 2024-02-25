@@ -46,7 +46,7 @@ func TokenizeExpression(expression string) ([]Token, error) {
 	return tokens, nil
 }
 
-func ParseExpression(expression string) (float64, error) {
+func ParseExpression(expression string, durationMap map[string]int) (float64, error) {
 	tokens, err := TokenizeExpression(expression)
 	if err != nil {
 		return 0, err
@@ -66,7 +66,9 @@ func ParseExpression(expression string) (float64, error) {
 						return 0, fmt.Errorf("invalid operand 2: %s", tokens[i+1].Value)
 					}
 
-					result, err := EvaluateExpression(op1, op2, token.Value, 0)
+					duration := durationMap[token.Value] // Получаем время задержки для текущего оператора
+
+					result, err := EvaluateExpression(op1, op2, token.Value, duration)
 					if err != nil {
 						return 0, err
 					}

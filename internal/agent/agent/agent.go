@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,15 +26,17 @@ type Agent struct {
 	TaskQueues    []chan Task // Используем config.Task здесь
 	Workers       int
 	executingLock sync.Map // Map для отслеживания выполняющихся задач
+	durationMap   map[string]int
 }
 
-func NewAgent(id int, redis *redis.Client, workers int) *Agent {
+func NewAgent(id int, redis *redis.Client, workers int, durationMap map[string]int) *Agent {
 	log.Printf("Initializing agent with ID: %d", id)
 	agent := &Agent{
-		ID:         id,
-		Redis:      redis,
-		TaskQueues: make([]chan Task, workers), // Используем config.Task здесь
-		Workers:    workers,
+		ID:          id,
+		Redis:       redis,
+		TaskQueues:  make([]chan Task, workers), // Используем config.Task здесь
+		Workers:     workers,
+		durationMap: durationMap, // Установка значения durationMap
 	}
 
 	// Инициализируем каналы задач для воркеров
@@ -110,6 +113,11 @@ func (a *Agent) checkTasks() {
 	}
 
 	for _, taskKey := range tasks {
+		if strings.HasPrefix(taskKey, "lock:") {
+			// Пропускаем задачи с префиксом "lock"
+			continue
+		}
+
 		taskJSON, err := a.Redis.Get(context.Background(), taskKey).Bytes()
 		if err != nil {
 			log.Printf("Error getting task %s from Redis: %v", taskKey, err)
@@ -144,7 +152,7 @@ func hash(s string) int {
 	return int(h.Sum32())
 }
 func (a *Agent) processTask(task Task) {
-	result, err := expression.ParseExpression(task.Expression)
+	result, err := expression.ParseExpression(task.Expression, a.durationMap)
 	if err != nil {
 		log.Printf("Error parsing expression for task %s: %s", task.ID, err)
 		task.Status = "error"

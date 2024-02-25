@@ -9,7 +9,6 @@ import (
 )
 
 func main() {
-
 	redisClient := config.NewRedisClient()
 
 	if _, err := redisClient.Ping(context.Background()).Result(); err != nil {
@@ -17,11 +16,12 @@ func main() {
 	}
 
 	log.Println("Connected to Redis")
+
+	appConfig := config.NewAppConfig()
+
 	// Создание и запуск агентов
-	numAgents := 3
-	workersPerAgent := 5 // количество воркеров на каждого агента
-	for i := 1; i <= numAgents; i++ {
-		agent := agent.NewAgent(i, redisClient, workersPerAgent)
+	for i := 1; i <= appConfig.NumAgents; i++ {
+		agent := agent.NewAgent(i, redisClient, appConfig.WorkersPerAgent, appConfig.DurationMap)
 		go agent.Start()
 	}
 
