@@ -1,16 +1,26 @@
 package config
 
 import (
-	"github.com/go-redis/redis/v8"
+	"database/sql"
+	"log"
+	"time"
+
+	_ "github.com/lib/pq"
 )
 
-// настройка Redis
-func NewRedisClient() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
+// Функция для создания нового подключения к базе данных PostgreSQL
+func NewPostgreSQLDB() (*sql.DB, error) {
+	db, err := sql.Open("postgres", "user=postgres password=123456789 dbname=calc sslmode=disable")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Установите максимальное количество открытых соединений
+	db.SetMaxOpenConns(10)
+	// Установите максимальное время жизни соединения
+	db.SetConnMaxLifetime(time.Minute * 20)
+
+	return db, nil
 }
 
 type AppConfig struct {
@@ -21,13 +31,13 @@ type AppConfig struct {
 
 func NewAppConfig() *AppConfig {
 	return &AppConfig{
-		NumAgents:       3, //настройка кол. агентов
-		WorkersPerAgent: 5, //настройка кол. воркеров
+		NumAgents:       3, // Настройка количества агентов
+		WorkersPerAgent: 5, // Настройка количества воркеров
 		DurationMap: map[string]int{
-			"+": 3, // Пример времени задержки для сложения
-			"-": 3, // Пример времени задержки для вычитания
-			"*": 1, // Пример времени задержки для умножения
-			"/": 6, // Пример времени задержки для деления
+			"+": 10, // Пример времени задержки для сложения
+			"-": 10, // Пример времени задержки для вычитания
+			"*": 10, // Пример времени задержки для умножения
+			"/": 10, // Пример времени задержки для деления
 		},
 	}
 }

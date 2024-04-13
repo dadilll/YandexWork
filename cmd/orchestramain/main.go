@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 	"os"
@@ -9,29 +8,35 @@ import (
 	"github.com/Dadil/project/config"
 	"github.com/Dadil/project/internal/orchestra/api"
 	"github.com/Dadil/project/internal/orchestra/domain"
+	_ "github.com/lib/pq"
 )
 
 func main() {
-
-	redisClient := config.NewRedisClient()
-
-	// Проверка соединения с Redis
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		log.Fatal("Failed to connect to Redis:", err)
+	// Установка соединения с базой данных PostgreSQL
+	postgresDB, err := config.NewPostgreSQLDB()
+	if err != nil {
+		log.Fatalf("Failed to initialize PostgreSQL database: %v", err)
 	}
 
-	// Создание экземпляра оркестратора
-	orchestrator := domain.NewOrchestrator(redisClient)
+	// Проверка соединения с базой данных PostgreSQL
+	err = postgresDB.Ping()
+	if err != nil {
+		log.Fatal("Ошибка при пинге базы данных PostgreSQL:", err)
+	}
 
-	// Создание экземпляра HTTP API оркестратора
-	orchestratorAPI := api.NewOrchestratorAPI(orchestrator)
+	// Создание экземпляра Orchestrator с использованием PostgreSQL
+	orchestrator := domain.NewOrchestrator(postgresDB)
+	api := api.NewOrchestratorAPI(orchestrator)
 
-	// Запуск HTTP сервера
+	// Передача Router в HTTP-сервер
+	http.Handle("/", api.Router)
+
+	// Запуск HTTP-сервера
 	serverPort := os.Getenv("SERVER_PORT")
 	if serverPort == "" {
 		serverPort = "8080"
 	}
 
-	log.Printf("Starting server on port %s...", serverPort)
-	log.Fatal(http.ListenAndServe(":"+serverPort, orchestratorAPI.Router))
+	log.Printf("Запуск сервера на порту %s...", serverPort)
+	log.Fatal(http.ListenAndServe(":"+serverPort, nil))
 }

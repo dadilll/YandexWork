@@ -1,16 +1,13 @@
 package agent
 
 import (
-	"context"
-	"encoding/json"
 	"hash/fnv"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Dadil/project/internal/agent/expression"
-	"github.com/go-redis/redis/v8"
+	"github.com/jmoiron/sqlx"
 )
 
 type Task struct {
@@ -22,21 +19,21 @@ type Task struct {
 
 type Agent struct {
 	ID            int
-	Redis         *redis.Client
-	TaskQueues    []chan Task // Используем config.Task здесь
+	Postgres      *sqlx.DB
+	TaskQueues    []chan Task
 	Workers       int
-	executingLock sync.Map // Map для отслеживания выполняющихся задач
+	executingLock sync.Map
 	durationMap   map[string]int
 }
 
-func NewAgent(id int, redis *redis.Client, workers int, durationMap map[string]int) *Agent {
+func NewAgent(id int, postgres *sqlx.DB, workers int, durationMap map[string]int) *Agent {
 	log.Printf("Initializing agent with ID: %d", id)
 	agent := &Agent{
 		ID:          id,
-		Redis:       redis,
-		TaskQueues:  make([]chan Task, workers), // Используем config.Task здесь
+		Postgres:    postgres,
+		TaskQueues:  make([]chan Task, workers),
 		Workers:     workers,
-		durationMap: durationMap, // Установка значения durationMap
+		durationMap: durationMap,
 	}
 
 	// Инициализируем каналы задач для воркеров
@@ -54,11 +51,11 @@ func (a *Agent) Start() {
 		go a.worker(i) // Передаем индекс воркера в качестве аргумента
 	}
 
-	// Начало проверки задач из Redis
+	// Начало проверки задач из PostgreSQL
 	go func() {
 		// Бесконечный цикл для периодической проверки
 		for {
-			// Проверяем задачи в базе данных Redis
+			// Проверяем задачи в базе данных PostgreSQL
 			a.checkTasks()
 			// Ждем 5 секунд перед следующей проверкой
 			time.Sleep(5 * time.Second)
@@ -69,14 +66,9 @@ func (a *Agent) Start() {
 func (a *Agent) worker(workerID int) {
 	for task := range a.TaskQueues[workerID] {
 		// Пытаемся заблокировать задачу
-		lockKey := "lock:" + task.ID
-		locked, err := a.Redis.SetNX(context.Background(), lockKey, "locked", time.Minute).Result()
+		_, err := a.Postgres.Exec("INSERT INTO locks (id, status) VALUES ($1, 'locked') ON CONFLICT(id) DO NOTHING", task.ID)
 		if err != nil {
 			log.Printf("Error setting lock for task %s: %v", task.ID, err)
-			continue
-		}
-		if !locked {
-			// Задача уже обрабатывается другим агентом, пропускаем её
 			continue
 		}
 
@@ -88,7 +80,8 @@ func (a *Agent) worker(workerID int) {
 		log.Printf("Agent %d: Worker %d finished processing task %s", a.ID, workerID, task.ID)
 
 		// Снимаем блокировку
-		if err := a.Redis.Del(context.Background(), lockKey).Err(); err != nil {
+		_, err = a.Postgres.Exec("DELETE FROM locks WHERE id = $1", task.ID)
+		if err != nil {
 			log.Printf("Error removing lock for task %s: %v", task.ID, err)
 		}
 
@@ -106,39 +99,25 @@ func (a *Agent) markTaskAsFinished(taskID string) {
 }
 
 func (a *Agent) checkTasks() {
-	tasks, err := a.Redis.Keys(context.Background(), "*").Result()
+	rows, err := a.Postgres.Query("SELECT id, expression, status FROM tasks WHERE status != 'completed' AND status != 'error'")
 	if err != nil {
-		log.Printf("Error getting tasks from Redis: %v", err)
+		log.Printf("Error getting tasks from PostgreSQL: %v", err)
 		return
 	}
+	defer rows.Close()
 
-	for _, taskKey := range tasks {
-		if strings.HasPrefix(taskKey, "lock:") {
-			// Пропускаем задачи с префиксом "lock"
-			continue
-		}
-
-		taskJSON, err := a.Redis.Get(context.Background(), taskKey).Bytes()
-		if err != nil {
-			log.Printf("Error getting task %s from Redis: %v", taskKey, err)
-			continue
-		}
-
+	for rows.Next() {
 		var task Task
-		err = json.Unmarshal(taskJSON, &task)
-		if err != nil {
-			log.Printf("Error decoding task %s: %v", taskKey, err)
+		if err := rows.Scan(&task.ID, &task.Expression, &task.Status); err != nil {
+			log.Printf("Error scanning task from PostgreSQL: %v", err)
 			continue
 		}
-
-		// Проверяем статус задачи, пропускаем выполненные и задачи с ошибкой
-		if task.Status == "completed" || task.Status == "error" {
-			continue
-		}
-
 		// Определяем индекс очереди задач
 		queueIndex := a.getQueueIndex(task.ID)
 		a.TaskQueues[queueIndex] <- task
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over task rows: %v", err)
 	}
 }
 
@@ -151,6 +130,7 @@ func hash(s string) int {
 	h.Write([]byte(s))
 	return int(h.Sum32())
 }
+
 func (a *Agent) processTask(task Task) {
 	result, err := expression.ParseExpression(task.Expression, a.durationMap)
 	if err != nil {
@@ -161,14 +141,10 @@ func (a *Agent) processTask(task Task) {
 		task.Status = "completed"
 	}
 
-	taskJSON, err := json.Marshal(task)
+	// Обновляем задачу в базе данных PostgreSQL
+	_, err = a.Postgres.Exec("UPDATE tasks SET result = $1, status = $2 WHERE id = $3", task.Result, task.Status, task.ID)
 	if err != nil {
-		log.Printf("Error marshaling task %s: %s", task.ID, err)
+		log.Printf("Error updating task %s in PostgreSQL: %v", task.ID, err)
 		return
-	}
-
-	err = a.Redis.Set(context.Background(), task.ID, taskJSON, 0).Err()
-	if err != nil {
-		log.Printf("Error updating task %s: %s", task.ID, err)
 	}
 }

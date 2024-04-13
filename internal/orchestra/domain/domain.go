@@ -1,12 +1,11 @@
 package domain
 
 import (
-	"context"
-	"encoding/json"
+	"database/sql"
 	"log"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Task struct {
@@ -16,8 +15,14 @@ type Task struct {
 	Result     float64 `json:"result"`
 }
 
+type User struct {
+	Login    string
+	Password string
+	ID       int
+}
+
 type Orchestrator struct {
-	Redis          *redis.Client
+	DB             *sql.DB
 	Agents         []*Agent
 	processedTasks map[string]bool
 }
@@ -27,16 +32,16 @@ type Agent struct {
 	TaskChannel chan Task
 }
 
-func NewOrchestrator(redis *redis.Client) *Orchestrator {
+func NewOrchestrator(db *sql.DB) *Orchestrator {
 	return &Orchestrator{
-		Redis:          redis,
+		DB:             db,
 		processedTasks: make(map[string]bool),
 	}
 }
 
 func (o *Orchestrator) AddTask(expression string) (string, error) {
 	taskID := generateTaskID()
-	task := Task{ID: taskID, Expression: expression, Status: "pending"} // Используем config.Task здесь
+	task := Task{ID: taskID, Expression: expression, Status: "pending"}
 
 	// Проверяем, была ли уже обработана задача с таким ID
 	if _, exists := o.processedTasks[taskID]; exists {
@@ -44,15 +49,10 @@ func (o *Orchestrator) AddTask(expression string) (string, error) {
 		return taskID, nil
 	}
 
-	data, err := json.Marshal(task)
+	_, err := o.DB.Exec("INSERT INTO tasks (id, expression, status, result) VALUES ($1, $2, $3, $4)",
+		taskID, task.Expression, task.Status, task.Result)
 	if err != nil {
-		log.Println("Error marshaling task:", err)
-		return "", err
-	}
-
-	err = o.Redis.Set(context.Background(), taskID, data, 0).Err()
-	if err != nil {
-		log.Println("Error saving task to Redis:", err)
+		log.Println("Error saving task to PostgreSQL:", err)
 		return "", err
 	}
 
@@ -63,27 +63,21 @@ func (o *Orchestrator) AddTask(expression string) (string, error) {
 }
 
 func (o *Orchestrator) GetTasks() []Task {
-	taskKeys, err := o.Redis.Keys(context.Background(), "*").Result()
+	rows, err := o.DB.Query("SELECT id, expression, status, result FROM tasks")
 	if err != nil {
-		log.Println("Error getting task keys from Redis:", err)
+		log.Println("Error getting tasks from PostgreSQL:", err)
 		return nil
 	}
+	defer rows.Close()
 
 	var tasks []Task
-	for _, taskID := range taskKeys { // Используйте просто taskID вместо "task:" + taskID
-		data, err := o.Redis.Get(context.Background(), taskID).Result()
-		if err != nil {
-			log.Println("Error getting task from Redis:", err)
-			continue
-		}
-
+	for rows.Next() {
 		var task Task
-		err = json.Unmarshal([]byte(data), &task)
+		err := rows.Scan(&task.ID, &task.Expression, &task.Status, &task.Result)
 		if err != nil {
-			log.Println("Error unmarshaling task:", err)
+			log.Println("Error scanning task:", err)
 			continue
 		}
-
 		tasks = append(tasks, task)
 	}
 
@@ -91,22 +85,75 @@ func (o *Orchestrator) GetTasks() []Task {
 }
 
 func (o *Orchestrator) GetTaskByID(id string) *Task {
-	data, err := o.Redis.Get(context.Background(), id).Result()
-	if err != nil {
-		log.Println("Error getting task from Redis:", err)
-		return nil
-	}
-
 	var task Task
-	err = json.Unmarshal([]byte(data), &task)
+	err := o.DB.QueryRow("SELECT id, expression, status, result FROM tasks WHERE id = $1", id).
+		Scan(&task.ID, &task.Expression, &task.Status, &task.Result)
 	if err != nil {
-		log.Println("Error unmarshaling task:", err)
+		if err == sql.ErrNoRows {
+			log.Println("Task not found:", id)
+			return nil
+		}
+		log.Println("Error getting task from PostgreSQL:", err)
 		return nil
 	}
-
 	return &task
 }
+
+func (o *Orchestrator) GetTasksByUserID(userID string) []Task {
+	rows, err := o.DB.Query("SELECT t.id, t.expression, t.status, t.result FROM tasks t JOIN user_tasks ut ON t.id = ut.task_id WHERE ut.user_id = $1", userID)
+	if err != nil {
+		log.Println("Error getting tasks from PostgreSQL:", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		var task Task
+		err := rows.Scan(&task.ID, &task.Expression, &task.Status, &task.Result)
+		if err != nil {
+			log.Println("Error scanning task:", err)
+			continue
+		}
+		tasks = append(tasks, task)
+	}
+
+	return tasks
+}
+
 func generateTaskID() string {
 	taskID := uuid.New()
 	return taskID.String()
+}
+
+func (o *Orchestrator) CreateUser(login, password string) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Println("Error hashing password:", err)
+		return err
+	}
+
+	_, err = o.DB.Exec("INSERT INTO users (login, password) VALUES ($1, $2)", login, string(hashedPassword))
+	if err != nil {
+		log.Println("Error creating user:", err)
+		return err
+	}
+
+	return nil
+}
+
+func (o *Orchestrator) GetUserByLogin(login string) (*User, error) {
+	var user User
+	err := o.DB.QueryRow("SELECT login, password FROM users WHERE login = $1", login).
+		Scan(&user.Login, &user.Password)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Println("User not found:", login)
+			return nil, err
+		}
+		log.Println("Error getting user from PostgreSQL:", err)
+		return nil, err
+	}
+
+	return &user, nil
 }
