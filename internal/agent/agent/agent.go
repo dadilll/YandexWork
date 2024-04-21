@@ -22,8 +22,8 @@ type Agent struct {
 	Postgres      *sqlx.DB
 	TaskQueues    []chan Task
 	Workers       int
-	executingLock sync.Map
-	durationMap   map[string]int
+	ExecutingLock sync.Map
+	DurationMap   map[string]int
 }
 
 func NewAgent(id int, postgres *sqlx.DB, workers int, durationMap map[string]int) *Agent {
@@ -33,7 +33,7 @@ func NewAgent(id int, postgres *sqlx.DB, workers int, durationMap map[string]int
 		Postgres:    postgres,
 		TaskQueues:  make([]chan Task, workers),
 		Workers:     workers,
-		durationMap: durationMap,
+		DurationMap: durationMap,
 	}
 
 	// Инициализируем каналы задач для воркеров
@@ -48,7 +48,7 @@ func (a *Agent) Start() {
 	log.Printf("Agent %d is starting %d workers", a.ID, a.Workers)
 	// Запуск воркеров
 	for i := 0; i < a.Workers; i++ {
-		go a.worker(i) // Передаем индекс воркера в качестве аргумента
+		go a.Worker(i) // Передаем индекс воркера в качестве аргумента
 	}
 
 	// Начало проверки задач из PostgreSQL
@@ -63,7 +63,7 @@ func (a *Agent) Start() {
 	}()
 }
 
-func (a *Agent) worker(workerID int) {
+func (a *Agent) Worker(workerID int) {
 	for task := range a.TaskQueues[workerID] {
 		// Пытаемся заблокировать задачу
 		_, err := a.Postgres.Exec("INSERT INTO locks (id, status) VALUES ($1, 'locked') ON CONFLICT(id) DO NOTHING", task.ID)
@@ -73,10 +73,10 @@ func (a *Agent) worker(workerID int) {
 		}
 
 		// Помечаем задачу как обрабатываемую этим воркером
-		a.markTaskAsBeingProcessed(task.ID)
+		a.MarkTaskAsBeingProcessed(task.ID)
 
 		log.Printf("Agent %d: Worker %d started processing task %s", a.ID, workerID, task.ID)
-		a.processTask(task)
+		a.ProcessTask(task)
 		log.Printf("Agent %d: Worker %d finished processing task %s", a.ID, workerID, task.ID)
 
 		// Снимаем блокировку
@@ -86,16 +86,16 @@ func (a *Agent) worker(workerID int) {
 		}
 
 		// По завершении обработки задачи освобождаем её
-		a.markTaskAsFinished(task.ID)
+		a.MarkTaskAsFinished(task.ID)
 	}
 }
 
-func (a *Agent) markTaskAsBeingProcessed(taskID string) {
-	a.executingLock.Store(taskID, true)
+func (a *Agent) MarkTaskAsBeingProcessed(taskID string) {
+	a.ExecutingLock.Store(taskID, true)
 }
 
-func (a *Agent) markTaskAsFinished(taskID string) {
-	a.executingLock.Delete(taskID)
+func (a *Agent) MarkTaskAsFinished(taskID string) {
+	a.ExecutingLock.Delete(taskID)
 }
 
 func (a *Agent) checkTasks() {
@@ -113,7 +113,7 @@ func (a *Agent) checkTasks() {
 			continue
 		}
 		// Определяем индекс очереди задач
-		queueIndex := a.getQueueIndex(task.ID)
+		queueIndex := a.GetQueueIndex(task.ID)
 		a.TaskQueues[queueIndex] <- task
 	}
 	if err := rows.Err(); err != nil {
@@ -121,7 +121,7 @@ func (a *Agent) checkTasks() {
 	}
 }
 
-func (a *Agent) getQueueIndex(taskID string) int {
+func (a *Agent) GetQueueIndex(taskID string) int {
 	return int(hash(taskID)) % a.Workers
 }
 
@@ -131,8 +131,8 @@ func hash(s string) int {
 	return int(h.Sum32())
 }
 
-func (a *Agent) processTask(task Task) {
-	result, err := expression.ParseExpression(task.Expression, a.durationMap)
+func (a *Agent) ProcessTask(task Task) {
+	result, err := expression.ParseExpression(task.Expression, a.DurationMap)
 	if err != nil {
 		log.Printf("Error parsing expression for task %s: %s", task.ID, err)
 		task.Status = "error"

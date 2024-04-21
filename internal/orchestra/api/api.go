@@ -44,6 +44,36 @@ func (api *OrchestratorAPI) setupRoutes() {
 	api.Router.HandleFunc("/login", api.LoginUser).Methods("POST")
 	api.Router.HandleFunc("/add", api.AddExpression).Methods("POST")
 	api.Router.HandleFunc("/expressions", api.GetExpressions).Methods("GET")
+	api.Router.HandleFunc("/delete-tasks", api.DeleteAllTasksForUser).Methods("DELETE")
+}
+
+func (api *OrchestratorAPI) DeleteAllTasksForUser(w http.ResponseWriter, r *http.Request) {
+	log.Println("Received request to delete all tasks for user")
+
+	authHeader := r.Header.Get("Authorization")
+	if _, err := ValidateJWTTokenFromHeader(authHeader); err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	login, err := ValidateJWTTokenFromHeader(authHeader)
+	if err != nil {
+		log.Println("Error validating JWT token:", err)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	err = api.Orchestrator.DeleteAllTasksForUser(login)
+	if err != nil {
+		log.Println("Error deleting tasks for user:", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Println("All tasks deleted successfully for user:", login)
+	response := map[string]string{"message": "All tasks deleted successfully"}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func (api *OrchestratorAPI) RegisterUser(w http.ResponseWriter, r *http.Request) {
@@ -160,10 +190,10 @@ func (api *OrchestratorAPI) GetUserHashByLogin(login string) (string, error) {
 	return user.Password, nil
 }
 
-func ValidateJWTTokenFromHeader(header string) (*jwt.Token, error) {
+func ValidateJWTTokenFromHeader(header string) (string, error) {
 	tokenString := extractTokenFromHeader(header)
 	if tokenString == "" {
-		return nil, fmt.Errorf("no token found in Authorization header")
+		return "", fmt.Errorf("no token found in Authorization header")
 	}
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -173,23 +203,32 @@ func ValidateJWTTokenFromHeader(header string) (*jwt.Token, error) {
 		return []byte("DbJ8nHvYX5QhragK8T5G4vsGxOgkorBtqBPMbPhPAw4="), nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse JWT token: %v", err)
+		return "", fmt.Errorf("failed to parse JWT token: %v", err)
 	}
 
-	return token, nil
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return "", fmt.Errorf("invalid token")
+	}
+
+	login, ok := claims["login"].(string)
+	if !ok {
+		return "", fmt.Errorf("invalid token claims")
+	}
+
+	return login, nil
 }
 
 func (api *OrchestratorAPI) GetExpressions(w http.ResponseWriter, r *http.Request) {
-	log.Println("Received request to get expressions")
+	log.Println("Received request to add expression")
 
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
+	if _, err := ValidateJWTTokenFromHeader(authHeader); err != nil {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// Убедимся, что переменная token используется для проверки валидности токена
-	_, err := ValidateJWTTokenFromHeader(authHeader)
+	login, err := ValidateJWTTokenFromHeader(authHeader)
 	if err != nil {
 		log.Println("Error validating JWT token:", err)
 		http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -197,7 +236,7 @@ func (api *OrchestratorAPI) GetExpressions(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Продолжаем выполнение запроса
-	expressions := api.Orchestrator.GetTasks()
+	expressions := api.Orchestrator.GetTasksForUser(login)
 	var tasks []*domain.Task
 	for _, expr := range expressions {
 		task := expr
@@ -223,13 +262,20 @@ func (api *OrchestratorAPI) AddExpression(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !isValidExpression(expressionRequest.Expression) {
+	if !IsValidExpression(expressionRequest.Expression) {
 		log.Println("Invalid expression:", expressionRequest.Expression)
 		http.Error(w, "Expression is invalid", http.StatusBadRequest)
 		return
 	}
 
-	existingTasks := api.Orchestrator.GetTasks()
+	login, err := ValidateJWTTokenFromHeader(authHeader)
+	if err != nil {
+		log.Println("Error validating JWT token:", err)
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	existingTasks := api.Orchestrator.GetTasksForUser(login)
 	for _, task := range existingTasks {
 		if task.Expression == expressionRequest.Expression {
 			log.Println("Task with the same expression already exists")
@@ -238,7 +284,7 @@ func (api *OrchestratorAPI) AddExpression(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	id, err := api.Orchestrator.AddTask(expressionRequest.Expression)
+	id, err := api.Orchestrator.AddTaskForUser(expressionRequest.Expression, login)
 	if err != nil {
 		log.Println("Error adding task:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -250,16 +296,22 @@ func (api *OrchestratorAPI) AddExpression(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(response)
 }
 
-func isValidExpression(expr string) bool {
+func IsValidExpression(expr string) bool {
 	validExpression := regexp.MustCompile(`^[\d+\-*/\s]+$`)
 	return validExpression.MatchString(expr)
 }
 
 func jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(data)
+	jsonData, err := json.MarshalIndent(data, "", "    ")
 	if err != nil {
 		log.Println("Error encoding JSON:", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	_, err = w.Write(jsonData)
+	if err != nil {
+		log.Println("Error writing JSON response:", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}

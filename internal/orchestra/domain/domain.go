@@ -2,6 +2,7 @@ package domain
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 
 	"github.com/google/uuid"
@@ -18,7 +19,6 @@ type Task struct {
 type User struct {
 	Login    string
 	Password string
-	ID       int
 }
 
 type Orchestrator struct {
@@ -84,25 +84,16 @@ func (o *Orchestrator) GetTasks() []Task {
 	return tasks
 }
 
-func (o *Orchestrator) GetTaskByID(id string) *Task {
-	var task Task
-	err := o.DB.QueryRow("SELECT id, expression, status, result FROM tasks WHERE id = $1", id).
-		Scan(&task.ID, &task.Expression, &task.Status, &task.Result)
+func (o *Orchestrator) GetTasksForUser(login string) []Task {
+	rows, err := o.DB.Query(`
+        SELECT t.id, t.expression, t.status, t.result
+        FROM tasks t
+        JOIN user_tasks ut ON t.id = ut.task_id
+        JOIN users u ON ut.user_id = u.id
+        WHERE u.login = $1
+    `, login)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			log.Println("Task not found:", id)
-			return nil
-		}
-		log.Println("Error getting task from PostgreSQL:", err)
-		return nil
-	}
-	return &task
-}
-
-func (o *Orchestrator) GetTasksByUserID(userID string) []Task {
-	rows, err := o.DB.Query("SELECT t.id, t.expression, t.status, t.result FROM tasks t JOIN user_tasks ut ON t.id = ut.task_id WHERE ut.user_id = $1", userID)
-	if err != nil {
-		log.Println("Error getting tasks from PostgreSQL:", err)
+		log.Println("Error getting tasks for user from PostgreSQL:", err)
 		return nil
 	}
 	defer rows.Close()
@@ -119,6 +110,39 @@ func (o *Orchestrator) GetTasksByUserID(userID string) []Task {
 	}
 
 	return tasks
+}
+
+func (o *Orchestrator) AddTaskForUser(expression string, userName string) (string, error) {
+	taskID := generateTaskID()
+	task := Task{ID: taskID, Expression: expression, Status: "pending"}
+
+	// Проверяем существование пользователя по его имени
+	var userID string
+	err := o.DB.QueryRow("SELECT id FROM users WHERE login = $1", userName).Scan(&userID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Println("User not found:", userName)
+			return "", fmt.Errorf("user not found: %s", userName)
+		}
+		log.Println("Error getting user from PostgreSQL:", err)
+		return "", err
+	}
+
+	_, err = o.DB.Exec("INSERT INTO tasks (id, expression, status, result) VALUES ($1, $2, $3, $4)",
+		taskID, task.Expression, task.Status, task.Result)
+	if err != nil {
+		log.Println("Error saving task to PostgreSQL:", err)
+		return "", err
+	}
+
+	// Связываем задачу с пользователем
+	_, err = o.DB.Exec("INSERT INTO user_tasks (user_id, task_id) VALUES ($1, $2)", userID, taskID)
+	if err != nil {
+		log.Println("Error associating task with user:", err)
+		return "", err
+	}
+
+	return taskID, nil
 }
 
 func generateTaskID() string {
@@ -156,4 +180,22 @@ func (o *Orchestrator) GetUserByLogin(login string) (*User, error) {
 	}
 
 	return &user, nil
+}
+
+func (o *Orchestrator) DeleteAllTasksForUser(login string) error {
+	// Удаляем все задачи пользователя из таблицы tasks
+	_, err := o.DB.Exec("DELETE FROM tasks WHERE id IN (SELECT task_id FROM user_tasks WHERE user_id = (SELECT id FROM users WHERE login = $1))", login)
+	if err != nil {
+		log.Println("Error deleting tasks for user:", err)
+		return err
+	}
+
+	// Удаляем записи о связях пользователей с задачами из таблицы user_tasks
+	_, err = o.DB.Exec("DELETE FROM user_tasks WHERE user_id = (SELECT id FROM users WHERE login = $1)", login)
+	if err != nil {
+		log.Println("Error deleting user-task associations:", err)
+		return err
+	}
+
+	return nil
 }

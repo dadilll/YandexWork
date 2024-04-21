@@ -1,0 +1,13 @@
+# Используем официальный образ PostgreSQL
+FROM postgres:latest
+
+# Копируем скрипт инициализации базы данных
+COPY init.sql /docker-entrypoint-initdb.d/
+
+# Устанавливаем переменную окружения POSTGRES_USER, POSTGRES_PASSWORD и POSTGRES_DB
+ENV POSTGRES_USER=postgres
+ENV POSTGRES_PASSWORD=123456789
+ENV POSTGRES_DB=calc
+
+# Определяем порт, который будет открыт для внешнего доступа
+EXPOSE 5433

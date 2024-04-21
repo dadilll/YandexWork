@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: dockerfile.agent
+    container_name: agent_container
+    restart: always
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: dockerfile.orchestra
+    container_name: orchestrator_container
+    restart: always
+
+  db:
+    image: postgres:latest
+    container_name: postgres_container
+    ports:
+      - "5433:5432"  # Исправлен порт на стандартный для PostgreSQL
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456789
+      POSTGRES_DB: calc
