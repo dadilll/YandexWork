@@ -16,6 +16,7 @@
 - [ ] Задача : Покрытие тестами проекта(Высокий Приоритет)
 
 ## Завершено
+- [x] Задача : Покрытие тестами проекта(Высокий Приоритет)
 - [x] Задача : Работа в конкретном пользователе
 - [x] Задача : Переход с Redis на Postgres.
 - [x] Задача : Возможность регистрировать и логинится в аккаунты.
@@ -27,11 +28,17 @@
 - [x] Задача : Сделать оркестратор
 
 ## Перед запуском
-Перед запуском необходимо установить Redis, также требуется настроить время выполнения операторов и количество агентов и воркеров в configurations.go.
+Перед запуском необходимо настроить время выполнения операторов и количество агентов и воркеров в configurations.go.
 
-## Запуск 
+## Запуск без докера
 
-Для запуска проекта требуется запустить два основных скрипта, расположенные в каталогах agentmain и orchestramain.
+Необхадимо установить PostgreSQL потребуется разметить новые таблицы(Их можно будет посмотреть в файле init.sql). После чего необхадимо будет настроить конфигурацию в файле configurations.go. Для запуска проекта требуется запустить два основных скрипта, расположенные в каталогах agentmain и orchestramain.
+
+## Запуск с докером
+Пока что у меня нечего не работает. Если вам не в падлу можете поробовать сделать что то с моим говнокодом. 
+
+### Тесты
+Описание тестов можно будет увидеть в самих тестах
 
 ## EndPoint
 
@@ -39,19 +46,37 @@
 Для получения списка задач используйте следующий запрос:
 
 ```bash
-curl -X GET http://localhost:8080/expressions 
+curl -X GET http://localhost:8080/expressions \
+-H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 ### Добавление задач
 Чтобы добавить новую задачу, выполните POST-запрос с указанием выражения в формате JSON. Пример запроса:
 
 ```bash
-curl -X POST -H "Content-Type: application/json" -d '{"expression":"your_expression_here"}' http://localhost:8080/add
+curl -X POST http://localhost:8080/add \
+-H "Content-Type: application/json" \
+-H "Authorization: Bearer YOUR_JWT_TOKEN" \
+-d '{"expression": "2 + 2"}'
 ```
 
 ### Удаление всех задач
 Чтобы удалить все задачи из системы, выполните DELETE-запрос на эндпоинт /delete-all. Ниже приведен пример:
 
 ```bash
-curl -X DELETE http://localhost:8080/delete-all
+curl -X DELETE http://localhost:8080/delete-tasks \
+-H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+### Регистрация нового пользователя (/register)
+```bash
+curl -X POST http://your-api-url/register \
+-H "Content-Type: application/json" \
+-d '{"login": "login":"", "password":""}'
+```
+
+### Вход пользователя (/login)
+```bash
+curl -X POST http://your-api-url/register \
+-H "Content-Type: application/json" \
+-d '{"login": "login":"", "password":""}'
 ```
