@@ -69,14 +69,14 @@ curl -X DELETE http://localhost:8080/delete-tasks \
 ```
 ### Регистрация нового пользователя (/register)
 ```bash
-curl -X POST http://your-api-url/register \
+curl -X POST http://localhost:8080/register \
 -H "Content-Type: application/json" \
 -d '{"login": "login":"", "password":""}'
 ```
 
 ### Вход пользователя (/login)
 ```bash
-curl -X POST http://your-api-url/register \
+curl -X POST http://localhost:8080/register \
 -H "Content-Type: application/json" \
 -d '{"login": "login":"", "password":""}'
 ```
