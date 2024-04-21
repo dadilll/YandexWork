@@ -10,24 +10,26 @@ import (
 )
 
 func main() {
-	// Установка соединения с базой данных PostgreSQL
-	postgresDB, err := sqlx.Open("postgres", "user=postgres password=123456789 dbname=calc sslmode=disable")
+	postgresDB, err := config.NewPostgreSQLDB()
 	if err != nil {
-		log.Fatalf("Failed to open PostgreSQL database: %v", err)
+		log.Fatalf("Failed to initialize PostgreSQL database: %v", err)
 	}
 
-	// Проверка соединения
-	if err = postgresDB.Ping(); err != nil {
-		log.Fatalf("Failed to ping PostgreSQL database: %v", err)
+	err = postgresDB.Ping()
+	if err != nil {
+		log.Fatal("Ошибка при пинге базы данных PostgreSQL:", err)
 	}
 
 	log.Println("Connected to PostgreSQL database")
+
+	// Convert postgresDB to *sqlx.DB
+	postgresDBx := sqlx.NewDb(postgresDB, "postgres")
 
 	appConfig := config.NewAppConfig()
 
 	// Создание и запуск агентов
 	for i := 1; i <= appConfig.NumAgents; i++ {
-		agent := agent.NewAgent(i, postgresDB, appConfig.WorkersPerAgent, appConfig.DurationMap)
+		agent := agent.NewAgent(i, postgresDBx, appConfig.WorkersPerAgent, appConfig.DurationMap)
 		go agent.Start()
 	}
 
