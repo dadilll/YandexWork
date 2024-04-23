@@ -31,7 +31,6 @@
 Перед запуском необходимо настроить время выполнения операторов и количество агентов и воркеров в configurations.go.
 
 ## Запуск без докера
-
 Необхадимо установить PostgreSQL и разметить новые таблицы(Их можно будет посмотреть в файле init.sql). После чего необходимо будет настроить конфигурацию SQL в файле configurations.go. Для запуска проекта требуется запустить два основных скрипта, расположенные в каталогах agentmain и orchestramain.
 
 ## Запуск с докером
@@ -42,18 +41,13 @@
 описание тестов в файле TEST.md
 
 ## EndPoint
-
 ### Получение списка задач
-Для получения списка задач используйте следующий запрос:
-
 ```bash
 curl -X GET http://localhost:8080/expressions \
 -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 ### Добавление задач
-Чтобы добавить новую задачу, выполните POST-запрос с указанием выражения в формате JSON. Пример запроса:
-
 ```bash
 curl -X POST http://localhost:8080/add \
 -H "Content-Type: application/json" \
@@ -62,8 +56,6 @@ curl -X POST http://localhost:8080/add \
 ```
 
 ### Удаление всех задач
-Чтобы удалить все задачи из системы, выполните DELETE-запрос на эндпоинт /delete-all. Ниже приведен пример:
-
 ```bash
 curl -X DELETE http://localhost:8080/delete-tasks \
 -H "Authorization: Bearer YOUR_JWT_TOKEN"
